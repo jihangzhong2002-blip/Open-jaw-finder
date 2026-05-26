@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Open-Jaw Finder</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, sans-serif; background: #f5f5f5; color: #333; }
+    .header { background: #1a73e8; color: white; padding: 24px; text-align: center; }
+    .header h1 { font-size: 24px; margin-bottom: 4px; }
+    .header p { font-size: 14px; opacity: 0.85; }
+    .container { max-width: 800px; margin: 24px auto; padding: 0 16px; }
+    .card { background: white; border-radius: 12px; padding: 24px; margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
+    .tabs { display: flex; gap: 8px; margin-bottom: 20px; }
+    .tab { flex: 1; padding: 10px; border: 2px solid #ddd; border-radius: 8px; background: white; cursor: pointer; font-size: 14px; transition: all 0.2s; }
+    .tab.active { border-color: #1a73e8; color: #1a73e8; font-weight: 600; }
+    .form-row { display: flex; gap: 12px; flex-wrap: wrap; }
+    .form-group { flex: 1; min-width: 140px; }
+    label { display: block; font-size: 12px; color: #666; margin-bottom: 6px; font-weight: 500; }
+    input { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; }
+    input:focus { outline: none; border-color: #1a73e8; }
+    .btn { width: 100%; padding: 12px; background: #1a73e8; color: white; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; margin-top: 16px; }
+    .btn:hover { background: #1557b0; }
+    .btn:disabled { background: #aaa; cursor: not-allowed; }
+    .results { margin-top: 8px; }
+    .result-item { background: white; border-radius: 10px; padding: 16px 20px; margin-bottom: 10px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); display: flex; justify-content: space-between; align-items: center; }
+    .route { font-size: 15px; font-weight: 600; }
+    .route span { color: #1a73e8; }
+    .legs { font-size: 12px; color: #888; margin-top: 4px; }
+    .distance { font-size: 12px; color: #aaa; margin-top: 2px; }
+    .price { text-align: right; }
+    .price .total { font-size: 20px; font-weight: 700; color: #1a73e8; }
+    .price .label { font-size: 11px; color: #aaa; }
+    .error { color: #d32f2f; background: #fdecea; padding: 12px; border-radius: 8px; font-size: 14px; }
+    .loading { text-align: center; padding: 40px; color: #888; }
+    .note { font-size: 12px; color: #aaa; margin-top: 8px; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>✈️ Open-Jaw Finder</h1>
+    <p>找最便宜的开口程机票</p>
+  </div>
+  <div class="container">
+    <div class="card">
+      <div class="tabs">
+        <button class="tab active" onclick="setMode('explore')">🌍 探索模式</button>
+        <button class="tab" onclick="setMode('specify')">🎯 指定城市</button>
+      </div>
+
+      <div id="explore-form">
+        <div class="form-row">
+          <div class="form-group">
+            <label>出发地</label>
+            <input id="exp-from" value="SIN" placeholder="SIN" />
+          </div>
+          <div class="form-group">
+            <label>去程日期</label>
+            <input id="exp-date" type="date" />
+          </div>
+          <div class="form-group">
+            <label>最远距离 (km)</label>
+            <input id="exp-maxdist" type="number" value="1500" />
+          </div>
+        </div>
+        <p class="note">系统自动搜索所有城市对组合，按总价排序</p>
+      </div>
+
+      <div id="specify-form" style="display:none">
+        <div class="form-row">
+          <div class="form-group">
+            <label>出发地</label>
+            <input id="sp-from" value="SIN" placeholder="SIN" />
+          </div>
+          <div class="form-group">
+            <label>入境城市 (A)</label>
+            <input id="sp-to" placeholder="MXP" />
+          </div>
+          <div class="form-group">
+            <label>出境城市 (B)</label>
+            <input id="sp-return" placeholder="CDG" />
+          </div>
+        </div>
+        <div class="form-row" style="margin-top:12px">
+          <div class="form-group">
+            <label>去程日期</label>
+            <input id="sp-date" type="date" />
+          </div>
+          <div class="form-group">
+            <label>回程日期</label>
+            <input id="sp-returndate" type="date" />
+          </div>
+        </div>
+      </div>
+
+      <button class="btn" id="search-btn" onclick="search()">搜索</button>
+    </div>
+
+    <div id="results" class="results"></div>
+  </div>
+
+  <script>
+    let mode = 'explore';
+
+    function setMode(m) {
+      mode = m;
+      document.querySelectorAll('.tab').forEach((t, i) => {
+        t.classList.toggle('active', (i === 0 && m === 'explore') || (i === 1 && m === 'specify'));
+      });
+      document.getElementById('explore-form').style.display = m === 'explore' ? '' : 'none';
+      document.getElementById('specify-form').style.display = m === 'specify' ? '' : 'none';
+    }
+
+    function distKm(lat1, lon1, lat2, lon2) {
+      const R = 6371;
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLon/2)**2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+
+    async function search() {
+      const btn = document.getElementById('search-btn');
+      const resultsDiv = document.getElementById('results');
+      btn.disabled = true;
+      btn.textContent = '搜索中...';
+      resultsDiv.innerHTML = '<div class="loading">正在搜索，请稍候...</div>';
+
+      try {
+        if (mode === 'specify') {
+          await searchSpecify();
+        } else {
+          await searchExplore();
+        }
+      } catch(e) {
+        resultsDiv.innerHTML = `<div class="error">出错了：${e.message}</div>`;
+      }
+
+      btn.disabled = false;
+      btn.textContent = '搜索';
+    }
+
+    async function searchSpecify() {
+      const from = document.getElementById('sp-from').value.trim().toUpperCase();
+      const to = document.getElementById('sp-to').value.trim().toUpperCase();
+      const ret = document.getElementById('sp-return').value.trim().toUpperCase();
+      const date = document.getElementById('sp-date').value;
+      const returnDate = document.getElementById('sp-returndate').value;
+
+      const res = await fetch(`/api/search?mode=specify&from=${from}&to=${to}&returnCity=${ret}&date=${date}&returnDate=${returnDate}`);
+      const data = await res.json();
+
+      if (data.error) throw new Error(data.error);
+
+      const outPrice = data.outbound?.data?.itineraries?.[0]?.price?.raw || null;
+      const inPrice = data.inbound?.data?.itineraries?.[0]?.price?.raw || null;
+
+      if (!outPrice || !inPrice) {
+        document.getElementById('results').innerHTML = '<div class="error">找不到符合条件的航班，请换个日期试试。</div>';
+        return;
+      }
+
+      const total = (outPrice + inPrice).toFixed(0);
+      document.getElementById('results').innerHTML = `
+        <div class="result-item">
+          <div>
+            <div class="route">${from} → <span>${to}</span> … <span>${ret}</span> → ${from}</div>
+            <div class="legs">去程 SGD ${outPrice.toFixed(0)} · 回程 SGD ${inPrice.toFixed(0)}</div>
+          </div>
+          <div class="price">
+            <div class="total">SGD ${total}</div>
+            <div class="label">合计</div>
+          </div>
+        </div>`;
+    }
+
+    async function searchExplore() {
+      const from = document.getElementById('exp-from').value.trim().toUpperCase();
+      const date = document.getElementById('exp-date').value;
+      const maxDist = parseInt(document.getElementById('exp-maxdist').value) || 1500;
+
+      const res = await fetch(`/api/search?mode=explore&from=${from}&date=${date}`);
+      const data = await res.json();
+
+      if (data.error) throw new Error(data.error);
+
+      const destinations = data?.data?.everywhereDestination?.results || [];
+      if (destinations.length === 0) {
+        document.getElementById('results').innerHTML = '<div class="error">没有找到航班数据，请检查日期或出发地。</div>';
+        return;
+      }
+
+      // 计算所有城市对组合
+      const pairs = [];
+      for (let i = 0; i < destinations.length; i++) {
+        for (let j = 0; j < destinations.length; j++) {
+          if (i === j) continue;
+          const a = destinations[i];
+          const b = destinations[j];
+          if (!a.content?.location || !b.content?.location) continue;
+          const dist = distKm(
+            a.content.location.lat, a.content.location.lon,
+            b.content.location.lat, b.content.location.lon
+          );
+          if (dist > maxDist) continue;
+          const priceA = a.content?.flightQuotes?.cheapest?.price || null;
+          const priceB = b.content?.flightQuotes?.cheapest?.price || null;
+          if (!priceA || !priceB) continue;
+          pairs.push({
+            cityA: a.content.location.name,
+            codeA: a.skyId,
+            cityB: b.content.location.name,
+            codeB: b.skyId,
+            priceA, priceB,
+            total: priceA + priceB,
+            dist: Math.round(dist)
+          });
+        }
+      }
+
+      pairs.sort((a, b) => a.total - b.total);
+      const top = pairs.slice(0, 20);
+
+      if (top.length === 0) {
+        document.getElementById('results').innerHTML = '<div class="error">没有找到合适的开口程组合，试试增大最远距离。</div>';
+        return;
+      }
+
+      document.getElementById('results').innerHTML = top.map(p => `
+        <div class="result-item">
+          <div>
+            <div class="route">${from} → <span>${p.cityA}</span> … <span>${p.cityB}</span> → ${from}</div>
+            <div class="legs">去程 SGD ${p.priceA} · 回程 SGD ${p.priceB}</div>
+            <div class="distance">${p.codeA} ↔ ${p.codeB} 直线距离约 ${p.dist} km</div>
+          </div>
+          <div class="price">
+            <div class="total">SGD ${p.total}</div>
+            <div class="label">合计</div>
+          </div>
+        </div>
+      `).join('');
+    }
+  </script>
+</body>
+</html>
