@@ -57,3 +57,7 @@ async function searchFlight(from, to, date, apiKey) {
   });
   return response.json();
 }
+
+const data = await response.json();
+console.log(JSON.stringify(data).slice(0, 500));
+return data;
